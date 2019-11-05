@@ -19,6 +19,8 @@ from __future__ import print_function
 
 import os
 import time
+import sys
+import argparse
 
 from magenta.models.coconet import lib_data
 from magenta.models.coconet import lib_graph
@@ -30,102 +32,126 @@ from six.moves import range
 from six.moves import zip
 import tensorflow as tf
 
-FLAGS = tf.app.flags.FLAGS
-flags = tf.app.flags
-flags.DEFINE_string('data_dir', None,
-                    'Path to the base directory for different datasets.')
-flags.DEFINE_string('logdir', None,
-                    'Path to the directory where checkpoints and '
-                    'summary events will be saved during training and '
-                    'evaluation. Multiple runs can be stored within the '
-                    'parent directory of `logdir`. Point TensorBoard '
-                    'to the parent directory of `logdir` to see all '
-                    'your runs.')
-flags.DEFINE_bool('log_progress', True,
-                  'If False, do not log any checkpoints and summary'
-                  'statistics.')
+sys.path.append("/Users/chrisolen/Documents/uchicago_courses/deep_learning_and_image_recognition/audio_generation/magenta")
+
+parser = argparse.ArgumentParser()
+
+parser.add_argument('--data_dir', default=None, type=str,
+                    help='Path to the base directory for different datasets.') 
+
+parser.add_argument('--logdir', default=None, type=str,
+                    help='Path to the directory where checkpoints and \
+                    summary events will be saved during training and \
+                    evaluation. Multiple runs can be stored within the \
+                    parent directory of `logdir`. Point TensorBoard \
+                    to the parent directory of `logdir` to see all \
+                    your runs.') 
+
+parser.add_argument('--log_progress', default=True, type=bool,
+                  help='If False, do not log any checkpoints and summary\
+                  statistics.') 
 
 # Dataset.
-flags.DEFINE_string('dataset', None,
-                    'Choices: Jsb16thSeparated, MuseData, Nottingham, '
-                    'PianoMidiDe')
-flags.DEFINE_float('quantization_level', 0.125, 'Quantization duration.'
-                   'For qpm=120, notated quarter note equals 0.5.')
+parser.add_argument('--dataset', default=None, type=str,
+                    help='Choices: Jsb16thSeparated, MuseData, Nottingham,\
+                    PianoMidiDe') 
 
-flags.DEFINE_integer('num_instruments', 4,
-                     'Maximum number of instruments that appear in this '
-                     'dataset.  Use 0 if not separating instruments and '
-                     'hence does not matter how many there are.')
-flags.DEFINE_bool('separate_instruments', True,
-                  'Separate instruments into different input feature'
-                  'maps or not.')
-flags.DEFINE_integer('crop_piece_len', 64, 'The number of time steps '
-                     'included in a crop')
+parser.add_argument('--quantization_level', default=0.125, type=float,
+                   help='Quantization duration.\
+                   For qpm=120, notated quarter note equals 0.5.') 
+
+parser.add_argument('--num_instruments', default=4, type=int,
+                     help='Maximum number of instruments that appear in this\
+                     dataset.  Use 0 if not separating instruments and\
+                     hence does not matter how many there are.') 
+
+parser.add_argument('--separate_instruments', default=True, type=bool,
+                  help='Separate instruments into different input feature\
+                  maps or not.') 
+
+parser.add_argument('--crop_piece_len', default=64, type=int,
+                    help='The number of time steps\
+                     included in a crop') 
 
 # Model architecture.
-flags.DEFINE_string('architecture', 'straight',
-                    'Convnet style. Choices: straight')
+parser.add_argument('--architecture', default='straight', type=str,
+                    help='Convnet style. Choices: straight') 
+
 # Hparams for depthwise separable conv.
-flags.DEFINE_bool('use_sep_conv', False, 'Use depthwise separable '
-                  'convolutions.')
-flags.DEFINE_integer('sep_conv_depth_multiplier', 1, 'Depth multiplier for'
-                     'depthwise separable convs.')
-flags.DEFINE_integer('num_initial_regular_conv_layers', 2, 'The number of'
-                     'regular convolutional layers to start with when using'
-                     'depthwise separable convolutional layers.')
+parser.add_argument('--use_sep_conv', default=False, type=bool, help='Use depthwise separable\
+                  convolutions.') 
+
+parser.add_argument('--sep_conv_depth_multiplier', default=1, type=int, help='Depth multiplier for\
+                     depthwise separable convs.') 
+
+parser.add_argument('--num_initial_regular_conv_layers', default=2, type=int, help='The number of\
+                     regular convolutional layers to start with when using\
+                     depthwise separable convolutional layers.') 
+
 # Hparams for reducing pointwise in separable convs.
-flags.DEFINE_integer('num_pointwise_splits', 1, 'Num of splits on the'
-                     'pointwise convolution stage in depthwise separable'
-                     'convolutions.')
-flags.DEFINE_integer('interleave_split_every_n_layers', 1, 'Num of split'
-                     'pointwise layers to interleave between full pointwise'
-                     'layers.')
+parser.add_argument('--num_pointwise_splits', default=1, type=int, help='Num of splits on the\
+                     pointwise convolution stage in depthwise separable\
+                     convolutions.') 
+
+parser.add_argument('--interleave_split_every_n_layers', default=1, type=int, help='Num of split\
+                     pointwise layers to interleave between full pointwise\
+                     layers.') 
+
 # Hparams for dilated conv.
-flags.DEFINE_integer('num_dilation_blocks', 3, 'The number dilation blocks'
-                     'that starts from dilation rate=1.')
-flags.DEFINE_bool('dilate_time_only', False, 'If set, only dilates the time'
-                  'dimension and not pitch.')
-flags.DEFINE_bool('repeat_last_dilation_level', False, 'If set, repeats the'
-                  'last dilation rate.')
-flags.DEFINE_integer('num_layers', 64, 'The number of convolutional layers'
-                     'for architectures that do not use dilated convs.')
-flags.DEFINE_integer('num_filters', 128,
-                     'The number of filters for each convolutional '
-                     'layer.')
-flags.DEFINE_bool('use_residual', True, 'Add residual connections or not.')
-flags.DEFINE_integer('batch_size', 20,
-                     'The batch size for training and validating the model.')
+parser.add_argument('--num_dilation_blocks', default=3, type=int, help='The number dilation blocks\
+                     that starts from dilation rate=1.') 
+
+parser.add_argument('--dilate_time_only', default=False, type=bool, help='If set, only dilates the time\
+                  dimension and not pitch.') 
+
+parser.add_argument('--repeat_last_dilation_level', default=False, type=bool, help='If set, repeats the\
+                  last dilation rate.')
+
+parser.add_argument('--num_layers', default=64, type=int, help='The number of convolutional layers\
+                     for architectures that do not use dilated convs.') 
+
+parser.add_argument('--num_filters', default=128, type=int,
+                     help='The number of filters for each convolutional\
+                     layer.') 
+
+parser.add_argument('--use_residual', default=True, type=bool, help='Add residual connections or not.') 
+
+parser.add_argument('--batch_size', default=20, type=int,
+                     help='The batch size for training and validating the model.') 
 
 # Mask related.
-flags.DEFINE_string('maskout_method', 'orderless',
-                    "The choices include: 'bernoulli' "
-                    "and 'orderless' (which "
-                    'invokes gradient rescaling as per NADE).')
-flags.DEFINE_bool(
-    'mask_indicates_context', True,
-    'Feed inverted mask into convnet so that zero-padding makes sense.')
-flags.DEFINE_bool('optimize_mask_only', False,
-                  'Optimize masked predictions only.')
-flags.DEFINE_bool('rescale_loss', True, 'Rescale loss based on context size.')
-flags.DEFINE_integer(
-    'patience', 5,
-    'Number of epochs to wait for improvement before decaying learning rate.')
+parser.add_argument('--maskout_method', default='orderless', type=str,
+                    help="The choices include: 'bernoulli'\
+                    and 'orderless' (which \
+                    invokes gradient rescaling as per NADE).") 
 
-flags.DEFINE_float('corrupt_ratio', 0.5, 'Fraction of variables to mask out.')
+parser.add_argument('--mask_indicates_context', default=True, type=bool, help='Feed inverted mask into convnet so that zero-padding makes sense.') 
+
+parser.add_argument('--optimize_mask_only', default=False, type=bool,help='Optimize masked predictions only.') 
+
+parser.add_argument('--rescale_loss', default=True, type=bool, help='Rescale loss based on context size.') 
+
+parser.add_argument('--patience', default=5, type=int, help='Number of epochs to wait for improvement before decaying learning rate.') 
+
+parser.add_argument('--corrupt_ratio', default=0.5, type=float, help='Fraction of variables to mask out.') 
+
 # Run parameters.
-flags.DEFINE_integer('num_epochs', 0,
-                     'The number of epochs to train the model. Default '
-                     'is 0, which means to run until terminated '
-                     'manually.')
-flags.DEFINE_integer('save_model_secs', 360,
-                     'The number of seconds between saving each '
-                     'checkpoint.')
-flags.DEFINE_integer('eval_freq', 5,
-                     'The number of training iterations before validation.')
-flags.DEFINE_string(
-    'run_id', '',
-    'A run_id to add to directory names to avoid accidentally overwriting when '
-    'testing same setups.')
+parser.add_argument('--num_epochs', default=0, type=int,
+                     help='The number of epochs to train the model. Default\
+                     is 0, which means to run until terminated\
+                     manually.')
+
+parser.add_argument('--save_model_secs', default=360, type=int,
+                     help='The number of seconds between saving each\
+                     checkpoint.') 
+
+parser.add_argument('--eval_freq', default=5, type=int,
+                     help='The number of training iterations before validation.') 
+
+parser.add_argument('--run_id', default='', type=str, help='A run_id to add to directory names to avoid accidentally overwriting when\
+                    testing same setups.') 
+
+args = parser.parse_args()
 
 
 def estimate_popstats(unused_sv, sess, m, dataset, unused_hparams):
@@ -202,7 +228,7 @@ def run_epoch(supervisor, sess, m, dataset, hparams, eval_op, experiment_type,
     run_stats['learning_rate'] = float(learning_rate)
 
   # Make summaries.
-  if FLAGS.log_progress:
+  if args.log_progress:
     summaries = tf.Summary()
     for stat_name, stat in six.iteritems(run_stats):
       value = summaries.value.add()
@@ -227,18 +253,18 @@ def main(unused_argv):
 
   tf.logging.set_verbosity(tf.logging.INFO)
 
-  if FLAGS.data_dir is None:
+  if args.data_dir is None:
     tf.logging.fatal('No input directory was provided.')
 
-  print(FLAGS.maskout_method, 'separate', FLAGS.separate_instruments)
+  print(args.maskout_method, 'separate', args.separate_instruments)
 
   hparams = _hparams_from_flags()
 
   # Get data.
-  print('dataset:', FLAGS.dataset, FLAGS.data_dir)
+  print('dataset:', args.dataset, args.data_dir)
   print('current dir:', os.path.curdir)
-  train_data = lib_data.get_dataset(FLAGS.data_dir, hparams, 'train')
-  valid_data = lib_data.get_dataset(FLAGS.data_dir, hparams, 'valid')
+  train_data = lib_data.get_dataset(args.data_dir, hparams, 'train')
+  valid_data = lib_data.get_dataset(args.data_dir, hparams, 'valid')
   print('# of train_data:', train_data.num_examples)
   print('# of valid_data:', valid_data.num_examples)
   if train_data.num_examples < hparams.batch_size:
@@ -248,7 +274,7 @@ def main(unused_argv):
   train_data.update_hparams(hparams)
 
   # Save hparam configs.
-  logdir = os.path.join(FLAGS.logdir, hparams.log_subdir_str)
+  logdir = os.path.join(args.logdir, hparams.log_subdir_str)
   tf.gfile.MakeDirs(logdir)
   config_fpath = os.path.join(logdir, 'config')
   tf.logging.info('Writing to %s', config_fpath)
@@ -266,20 +292,20 @@ def main(unused_argv):
 
     tracker = Tracker(
         label='validation loss',
-        patience=FLAGS.patience,
+        patience=args.patience,
         decay_op=m.decay_op,
-        save_path=os.path.join(FLAGS.logdir, hparams.log_subdir_str,
+        save_path=os.path.join(args.logdir, hparams.log_subdir_str,
                                'best_model.ckpt'))
 
     # Graph will be finalized after instantiating supervisor.
     sv = tf.train.Supervisor(
         logdir=logdir,
-        saver=tf.train.Supervisor.USE_DEFAULT if FLAGS.log_progress else None,
+        saver=tf.train.Supervisor.USE_DEFAULT if args.log_progress else None,
         summary_op=None,
-        save_model_secs=FLAGS.save_model_secs)
+        save_model_secs=args.save_model_secs)
     with sv.PrepareSession() as sess:
       epoch_count = 0
-      while epoch_count < FLAGS.num_epochs or not FLAGS.num_epochs:
+      while epoch_count < args.num_epochs or not args.num_epochs:
         if sv.should_stop():
           break
 
@@ -320,7 +346,7 @@ class Tracker(object):
 
   def __call__(self, loss, sess):
     if self.sign * loss > self.sign * self.best:
-      if FLAGS.log_progress:
+      if args.log_progress:
         tf.logging.info('Previous best %s: %.4f.', self.label, self.best)
         tf.gfile.MakeDirs(os.path.dirname(self.save_path))
         self.saver.save(sess, self.save_path)
@@ -373,9 +399,9 @@ def _hparams_from_flags():
       num_pointwise_splits interleave_split_every_n_layers
       """.split())
   hparams = lib_hparams.Hyperparameters(**dict(
-      (key, getattr(FLAGS, key)) for key in keys))
+      (key, getattr(args, key)) for key in keys))
   return hparams
 
 
-if __name__ == '__main__':
-  tf.app.run()
+#if __name__ == '__main__':
+#  tf.app.run()
